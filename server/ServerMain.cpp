@@ -8,7 +8,7 @@
 #include "Packet.h"
 #include "Entity.h"
 
-static constexpr auto EnetWaitTime = 1000 / Config::ServerTimestep;
+static constexpr auto ENetWaitTime = 1000 / Config::ServerTimestep;
 
 static uint64_t s_ServerStartTime;
 static ENetHost* s_Server;
@@ -134,7 +134,7 @@ static void NetworkPoll()
 	// To fix this, we implement our own timer which will keep track of the time to poll for network events, and pass a timeout
 	// of zero to enet_host_service.
 	uint64_t start = GetTime();
-	while (GetTime() - start < EnetWaitTime)
+	while (GetTime() - start < ENetWaitTime)
 	{
 		ENetEvent event;
 		if (enet_host_service(s_Server, &event, 0) > 0)
