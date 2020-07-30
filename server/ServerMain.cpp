@@ -105,8 +105,12 @@ static void BroadcastPacket(const std::shared_ptr<Packet>& packet)
 //       based on that.
 static bool ValidateInput(const InputSnapshot& input)
 {
-	if (input.DeltaX > 1.0f || input.DeltaY > 1.0f || input.DeltaTime > 1.0f)
-	{
+	if (
+		std::abs(input.DeltaX) > 1.0f ||
+		std::abs(input.DeltaY) > 1.0f ||
+		input.DeltaTime > 1.0f ||
+		input.DeltaTime < 0.0f
+	) {
 		return false;
 	}
 	else
