@@ -38,8 +38,7 @@ public:
 	bool OnUserUpdate(float dt) override
 	{
 		// Player input.
-		auto input = GetPlayerInput();
-		if (input.HasInput())
+		if (auto input = GetPlayerInput(); input.HasInput())
 		{
 			// Apply the input locally right away (prediction).
 			m_Player.Update(input, dt);
