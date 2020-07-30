@@ -6,8 +6,8 @@ file(GLOB_RECURSE SERVER_SRC
     server/*.h
     shared/*.cpp
     shared/*.h
-    deps/enet/*.cpp
-    deps/enet/*.h
+    deps/enet/enet.c
+    deps/enet/enet.h
 )
 
 file(GLOB_RECURSE CLIENT_SRC
@@ -15,8 +15,8 @@ file(GLOB_RECURSE CLIENT_SRC
     client/*.h
     shared/*.cpp
     shared/*.h
-    deps/enet/*.cpp
-    deps/enet/*.h
+    deps/enet/enet.c
+    deps/enet/enet.h
     deps/olcPixelGameEngine/*.cpp
     deps/olcPixelGameEngine/*.h
 )
