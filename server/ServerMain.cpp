@@ -7,12 +7,11 @@
 #include "Packet.h"
 #include "Entity.h"
 
-static constexpr auto MaxClients = 32;
 static constexpr auto EnetWaitTime = 1000 / Config::ServerTimestep;
 
 static ENetHost* s_Server;
 static bool s_Running = true;
-static std::array<Entity*, MaxClients> s_Clients;
+static std::array<Entity*, Config::MaxClients> s_Clients;
 static int s_ClientCount = 0;
 
 static void CreateServer()
@@ -21,7 +20,7 @@ static void CreateServer()
 	address.host = ENET_HOST_ANY;
 	address.port = Config::Port;
 
-	s_Server = enet_host_create(&address, MaxClients, 1, 0, 0);
+	s_Server = enet_host_create(&address, Config::MaxClients, 1, 0, 0);
 	if (s_Server == nullptr)
 	{
 		std::cout << "Failed to create ENet host." << std::endl;
@@ -32,7 +31,7 @@ static void CreateServer()
 // Finds a free client ID in the global client pool and returns it.
 static uint32_t AssignClient()
 {
-	for (uint32_t i = 0; i < MaxClients; i++)
+	for (uint32_t i = 0; i < Config::MaxClients; i++)
 	{
 		if (s_Clients[i] == nullptr)
 		{
@@ -82,6 +81,38 @@ static void BroadcastPacket(const std::shared_ptr<Packet>& packet)
 	enet_host_broadcast(s_Server, 0, enet_packet_create(writer.GetData(), writer.GetSize(), ENET_PACKET_FLAG_RELIABLE));
 }
 
+// Use this to check for cheating.
+// TODO: Implement a better check. Should probably check how far this movement will move the player and discard
+//       based on that.
+static bool ValidateInput(const InputSnapshot& input, float dt)
+{
+	if (input.DeltaX > 1.0f || input.DeltaY > 1.0f || dt > 1.0f)
+	{
+		return false;
+	}
+	else
+	{
+		return true;
+	}
+}
+
+static void HandlePacket(const std::shared_ptr<Packet>& p, uint32_t clientID)
+{
+	auto client = s_Clients[clientID];
+	if (client == nullptr) { return; }
+
+	switch (p->Type)
+	{
+	case PacketType::Input: {
+		auto packet = std::dynamic_pointer_cast<InputPacket>(p);
+		if (ValidateInput(packet->Input, packet->DeltaTime))
+		{
+			client->Update(packet->Input, packet->DeltaTime);
+		}
+	} break;
+	}
+}
+
 static void NetworkPoll()
 {
 	ENetEvent event;
@@ -95,7 +126,7 @@ static void NetworkPoll()
 			uint32_t id = AssignClient();
 			event.peer->data = reinterpret_cast<void*>(id);
 			s_ClientCount++;
-			std::cout << "Client connected, " << s_ClientCount << "/" << MaxClients << "." << std::endl;
+			std::cout << "Client connected, " << s_ClientCount << "/" << Config::MaxClients << "." << std::endl;
 
 			// Create a new packet to send to the client.
 			auto packet = Packet::Create<WelcomePacket>();
@@ -107,10 +138,25 @@ static void NetworkPoll()
 			uint32_t id = reinterpret_cast<uint32_t>(event.peer->data);
 			UnassignClient(id);
 			s_ClientCount--;
-			std::cout << "Client disconnected, " << s_ClientCount << "/" << MaxClients << "." << std::endl;
+			std::cout << "Client disconnected, " << s_ClientCount << "/" << Config::MaxClients << "." << std::endl;
 		} break;
 		case ENET_EVENT_TYPE_RECEIVE: {
-			std::cout << "ENET_EVENT_TYPE_RECEIVE" << std::endl;
+			uint32_t id = reinterpret_cast<uint32_t>(event.peer->data);
+
+			DataReader reader(event.packet->data, event.packet->dataLength);
+
+			// Read the packet ID from the buffer.
+			uint8_t packetID = reader.Read<uint8_t>();
+
+			// Create the packet based on its ID.
+			auto packet = Packet::CreateFromID(packetID);
+
+			// Read the rest of the packet from the buffer.
+			packet->Read(reader);
+
+			// Handle the packet.
+			HandlePacket(packet, id);
+
 			enet_packet_destroy(event.packet);
 		} break;
 		}
@@ -126,6 +172,20 @@ static void RunServer()
 	{
 		// Poll for incoming packets.
 		NetworkPoll();
+
+		// Send new world state out to clients.
+		auto packet = Packet::Create<WorldStatePacket>();
+		for (uint32_t i = 0; i < Config::MaxClients; i++)
+		{
+			auto client = s_Clients[i];
+			if (client == nullptr) { continue; }
+			WorldStatePacket::Entry entry;
+			entry.EntityID = i;
+			entry.X = client->X;
+			entry.Y = client->Y;
+			packet->Entries.push_back(entry);
+		}
+		BroadcastPacket(packet);
 	}
 }
 

@@ -1,3 +1,4 @@
+#include <array>
 #include <olcPixelGameEngine.h>
 #include <enet.h>
 
@@ -27,8 +28,7 @@ private:
 	GameState m_State = GameState::Handshaking;
 
 	uint32_t m_PlayerID = -1;
-
-	Entity m_Player;
+	std::array<Entity*, Config::MaxClients> m_Entities{ nullptr };
 public:
 	bool OnUserCreate() override
 	{
@@ -173,14 +173,61 @@ public:
 		}
 	}
 
+	void SendPacket(const std::shared_ptr<Packet>& packet)
+	{
+		if (!m_Connected) { return; }
+
+		// Write the packet to a buffer.
+		DataWriter writer;
+		writer.Write<uint8_t>(static_cast<uint8_t>(packet->Type));
+		packet->Write(writer);
+
+		// Hand it off to ENet.
+		// Note that ENet will copy the data to its own internal buffer.
+		enet_peer_send(m_Peer, 0, enet_packet_create(writer.GetData(), writer.GetSize(), ENET_PACKET_FLAG_RELIABLE));
+	}
+
 	void HandlePacket(const std::shared_ptr<Packet>& p)
 	{
 		switch (p->Type)
 		{
 		case PacketType::Welcome: {
 			auto packet = std::dynamic_pointer_cast<WelcomePacket>(p);
+
+			// Assign the players ID.
 			m_PlayerID = packet->ClientID;
+
+			// Create the players entity.
+			m_Entities[m_PlayerID] = new Entity;
+
+			// Move to the playing state.
 			m_State = GameState::Playing;
+		} break;
+		case PacketType::WorldState: {
+			auto packet = std::dynamic_pointer_cast<WorldStatePacket>(p);
+
+			for (auto& entry : packet->Entries)
+			{
+				if (entry.EntityID == m_PlayerID)
+				{
+					m_Entities[entry.EntityID]->X = entry.X;
+					m_Entities[entry.EntityID]->Y = entry.Y;
+
+					// Here we will do reconciliation.
+				}
+				else
+				{
+					if (m_Entities[entry.EntityID] == nullptr)
+					{
+						// If we encounter a new entity, create it.
+						m_Entities[entry.EntityID] = new Entity;
+					}
+
+					// Here we will do interpolation, but for now just set the entities position.
+					m_Entities[entry.EntityID]->X = entry.X;
+					m_Entities[entry.EntityID]->Y = entry.Y;
+				}
+			}
 		} break;
 		}
 	}
@@ -200,14 +247,24 @@ public:
 			// Only allow player input in the playing state.
 			if (auto input = GetPlayerInput(); input.HasInput())
 			{
+				// Send the input to the server.
+				auto packet = Packet::Create<InputPacket>();
+				packet->Input = input;
+				packet->DeltaTime = dt;
+				SendPacket(packet);
+
 				// Apply the input locally right away (prediction).
-				m_Player.Update(input, dt);
+				m_Entities[m_PlayerID]->Update(input, dt);
 			}
 		}
 
 		// Render.
 		Clear(olc::BLACK);
-		FillRect(m_Player.X, m_Player.Y, 16, 16);
+		for (auto entity : m_Entities)
+		{
+			if (entity == nullptr) { continue; }
+			FillRect(entity->X, entity->Y, 16, 16);
+		}
 
 		if (m_Connected)
 		{
