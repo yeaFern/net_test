@@ -41,6 +41,7 @@ static void NetworkPoll()
 		} break;
 		case ENET_EVENT_TYPE_RECEIVE: {
 			std::cout << "ENET_EVENT_TYPE_RECEIVE" << std::endl;
+			enet_packet_destroy(event.packet);
 		} break;
 		}
 	}
@@ -50,6 +51,7 @@ static void RunServer()
 {
 	CreateServer();
 
+	std::cout << "Server listening on port " << Config::Port << "." << std::endl;
 	while (s_Running)
 	{
 		// Poll for incoming packets.
