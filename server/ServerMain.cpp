@@ -1,5 +1,6 @@
 #include <iostream>
 #include <array>
+#include <chrono>
 #include <cassert>
 #include <enet.h>
 
@@ -9,10 +10,21 @@
 
 static constexpr auto EnetWaitTime = 1000 / Config::ServerTimestep;
 
+static uint64_t s_ServerStartTime;
 static ENetHost* s_Server;
 static bool s_Running = true;
 static std::array<Entity*, Config::MaxClients> s_Clients;
 static int s_ClientCount = 0;
+
+uint64_t GetMilliseconds()
+{
+	return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+}
+
+uint64_t GetTime()
+{
+	return GetMilliseconds() - s_ServerStartTime;
+}
 
 static void CreateServer()
 {
@@ -115,50 +127,60 @@ static void HandlePacket(const std::shared_ptr<Packet>& p, uint32_t clientID)
 
 static void NetworkPoll()
 {
-	ENetEvent event;
-	while (enet_host_service(s_Server, &event, EnetWaitTime) > 0)
+	// The timeout value given to enet_host_service is the amount of time to wait until an event is received.
+	// This means that enet_host_service will have to go the entire timeout without receiving a single event in order to return.
+	// In a multiplayer scenario this is somewhat unlikely and will result in this call hanging forever, and the world will not
+	// be ticked at all.
+	// To fix this, we implement our own timer which will keep track of the time to poll for network events, and pass a timeout
+	// of zero to enet_host_service.
+	uint64_t start = GetTime();
+	while (GetTime() - start < EnetWaitTime)
 	{
-		switch (event.type)
+		ENetEvent event;
+		if (enet_host_service(s_Server, &event, 0) > 0)
 		{
-		case ENET_EVENT_TYPE_CONNECT: {
-			// When a new client connects we will assign them an ID and send them a welcome packet
-			// containing their ID.
-			uint32_t id = AssignClient();
-			event.peer->data = reinterpret_cast<void*>(id);
-			s_ClientCount++;
-			std::cout << "Client connected, " << s_ClientCount << "/" << Config::MaxClients << "." << std::endl;
+			switch (event.type)
+			{
+			case ENET_EVENT_TYPE_CONNECT: {
+				// When a new client connects we will assign them an ID and send them a welcome packet
+				// containing their ID.
+				uint32_t id = AssignClient();
+				event.peer->data = reinterpret_cast<void*>(id);
+				s_ClientCount++;
+				std::cout << "Client connected, " << s_ClientCount << "/" << Config::MaxClients << "." << std::endl;
 
-			// Create a new packet to send to the client.
-			auto packet = Packet::Create<WelcomePacket>();
-			packet->ClientID = id;
-			SendPacket(event.peer, packet);
-		} break;
-		case ENET_EVENT_TYPE_DISCONNECT_TIMEOUT: case ENET_EVENT_TYPE_DISCONNECT: {
-			// When a client disconnects or times out, we can free their ID from the global pool.
-			uint32_t id = reinterpret_cast<uint32_t>(event.peer->data);
-			UnassignClient(id);
-			s_ClientCount--;
-			std::cout << "Client disconnected, " << s_ClientCount << "/" << Config::MaxClients << "." << std::endl;
-		} break;
-		case ENET_EVENT_TYPE_RECEIVE: {
-			uint32_t id = reinterpret_cast<uint32_t>(event.peer->data);
+				// Create a new packet to send to the client.
+				auto packet = Packet::Create<WelcomePacket>();
+				packet->ClientID = id;
+				SendPacket(event.peer, packet);
+			} break;
+			case ENET_EVENT_TYPE_DISCONNECT_TIMEOUT: case ENET_EVENT_TYPE_DISCONNECT: {
+				// When a client disconnects or times out, we can free their ID from the global pool.
+				uint32_t id = reinterpret_cast<uint32_t>(event.peer->data);
+				UnassignClient(id);
+				s_ClientCount--;
+				std::cout << "Client disconnected, " << s_ClientCount << "/" << Config::MaxClients << "." << std::endl;
+			} break;
+			case ENET_EVENT_TYPE_RECEIVE: {
+				uint32_t id = reinterpret_cast<uint32_t>(event.peer->data);
 
-			DataReader reader(event.packet->data, event.packet->dataLength);
+				DataReader reader(event.packet->data, event.packet->dataLength);
 
-			// Read the packet ID from the buffer.
-			uint8_t packetID = reader.Read<uint8_t>();
+				// Read the packet ID from the buffer.
+				uint8_t packetID = reader.Read<uint8_t>();
 
-			// Create the packet based on its ID.
-			auto packet = Packet::CreateFromID(packetID);
+				// Create the packet based on its ID.
+				auto packet = Packet::CreateFromID(packetID);
 
-			// Read the rest of the packet from the buffer.
-			packet->Read(reader);
+				// Read the rest of the packet from the buffer.
+				packet->Read(reader);
 
-			// Handle the packet.
-			HandlePacket(packet, id);
+				// Handle the packet.
+				HandlePacket(packet, id);
 
-			enet_packet_destroy(event.packet);
-		} break;
+				enet_packet_destroy(event.packet);
+			} break;
+			}
 		}
 	}
 }
@@ -191,6 +213,8 @@ static void RunServer()
 
 int main(int argc, char** argv)
 {
+	s_ServerStartTime = GetMilliseconds();
+
 	if (enet_initialize() != 0)
 	{
 		std::cout << "Failed to initialize ENet." << std::endl;
