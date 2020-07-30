@@ -16,7 +16,7 @@ static bool s_Running = true;
 
 struct Client
 {
-	Entity Entity;
+	Entity WorldEntity;
 	uint32_t LastInput;
 };
 
@@ -126,7 +126,7 @@ static void HandlePacket(const std::shared_ptr<Packet>& p, uint32_t clientID)
 		auto packet = std::dynamic_pointer_cast<InputPacket>(p);
 		if (ValidateInput(packet->Input))
 		{
-			client->Entity.Update(packet->Input);
+			client->WorldEntity.Update(packet->Input);
 			client->LastInput = packet->Input.SequenceNumber;
 		}
 	} break;
@@ -212,8 +212,8 @@ static void RunServer()
 			WorldStatePacket::Entry entry;
 			entry.EntityID = i;
 			entry.PreviousInput = client->LastInput;
-			entry.X = client->Entity.X;
-			entry.Y = client->Entity.Y;
+			entry.X = client->WorldEntity.X;
+			entry.Y = client->WorldEntity.Y;
 			packet->Entries.push_back(entry);
 		}
 		BroadcastPacket(packet);
