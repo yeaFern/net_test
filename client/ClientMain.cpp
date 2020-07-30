@@ -147,6 +147,12 @@ public:
 		if (GetKey(olc::S).bHeld) { dy += 1.0f; }
 		if (GetKey(olc::D).bHeld) { dx += 1.0f; }
 
+		// Cheat mode, server wont allow this.
+		if (GetKey(olc::UP   ).bHeld) { dy -= 8.0f; }
+		if (GetKey(olc::LEFT ).bHeld) { dx -= 8.0f; }
+		if (GetKey(olc::DOWN ).bHeld) { dy += 8.0f; }
+		if (GetKey(olc::RIGHT).bHeld) { dx += 8.0f; }
+
 		// Normalize the input if there was any.
 		if (float l = std::sqrt(dx * dx + dy * dy) != 0)
 		{
@@ -264,11 +270,8 @@ public:
 						// If we encounter a new entity, create it.
 						m_Entities[entry.EntityID] = new Player;
 					}
-
-					// Here we will do interpolation, but for now just set the entities position.
-					// m_Entities[entry.EntityID]->WorldEntity.X = entry.X;
-					// m_Entities[entry.EntityID]->WorldEntity.Y = entry.Y;
-
+			
+					// Add the position to the entities position buffer for interpolation.
 					m_Entities[entry.EntityID]->PositionBuffer.push_back(EntityPosition(m_GameTime, entry.X, entry.Y));
 				}
 			}
@@ -359,6 +362,9 @@ public:
 		{
 			DrawString(2, 2, "Not connected.", olc::DARK_RED);
 		}
+
+		uint32_t rtt = enet_peer_get_rtt(m_Peer);
+		DrawString(2, 12, "Ping: " + std::to_string(rtt) + "ms");
 
 		return true;
 	}
