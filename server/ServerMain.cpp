@@ -1,10 +1,10 @@
 #include <iostream>
 #include <enet.h>
 
-static constexpr auto Port = 26456;
-static constexpr auto MaxClients = 2;
-static constexpr auto Timestep = 30;
-static constexpr auto EnetWaitTime = 1000 / Timestep;
+#include "SharedConfig.h"
+
+static constexpr auto MaxClients = 32;
+static constexpr auto EnetWaitTime = 1000 / Config::ServerTimestep;
 
 static ENetHost* s_Server;
 static bool s_Running = true;
@@ -13,7 +13,7 @@ static void CreateServer()
 {
 	ENetAddress address = { 0 };
 	address.host = ENET_HOST_ANY;
-	address.port = Port;
+	address.port = Config::Port;
 
 	s_Server = enet_host_create(&address, MaxClients, 1, 0, 0);
 	if (s_Server == nullptr)
