@@ -62,7 +62,6 @@ struct WelcomePacket : public Packet
 struct InputPacket : public Packet
 {
 	InputSnapshot Input;
-	float DeltaTime = 0.0f;
 
 	InputPacket()
 		: Packet(PacketType::Input)
@@ -73,14 +72,16 @@ struct InputPacket : public Packet
 	{
 		Input.DeltaX = reader.Read<float>();
 		Input.DeltaY = reader.Read<float>();
-		DeltaTime = reader.Read<float>();
+		Input.SequenceNumber = reader.Read<uint32_t>();
+		Input.DeltaTime = reader.Read<float>();
 	}
 
 	void Write(DataWriter& writer) override
 	{
 		writer.Write<float>(Input.DeltaX);
 		writer.Write<float>(Input.DeltaY);
-		writer.Write<float>(DeltaTime);
+		writer.Write<uint32_t>(Input.SequenceNumber);
+		writer.Write<float>(Input.DeltaTime);
 	}
 };
 
@@ -91,6 +92,7 @@ struct WorldStatePacket : public Packet
 	struct Entry
 	{
 		uint32_t EntityID;
+		uint32_t PreviousInput;
 		float X;
 		float Y;
 	};
@@ -109,6 +111,7 @@ struct WorldStatePacket : public Packet
 		{
 			WorldStatePacket::Entry entry;
 			entry.EntityID = reader.Read<uint32_t>();
+			entry.PreviousInput = reader.Read<uint32_t>();
 			entry.X = reader.Read<float>();
 			entry.Y = reader.Read<float>();
 			Entries.push_back(entry);
@@ -121,6 +124,7 @@ struct WorldStatePacket : public Packet
 		for (const auto& entry : Entries)
 		{
 			writer.Write<uint32_t>(entry.EntityID);
+			writer.Write<uint32_t>(entry.PreviousInput);
 			writer.Write<float>(entry.X);
 			writer.Write<float>(entry.Y);
 		}

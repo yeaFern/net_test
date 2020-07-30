@@ -13,7 +13,14 @@ static constexpr auto ENetWaitTime = 1000 / Config::ServerTimestep;
 static uint64_t s_ServerStartTime;
 static ENetHost* s_Server;
 static bool s_Running = true;
-static std::array<Entity*, Config::MaxClients> s_Clients;
+
+struct Client
+{
+	Entity Entity;
+	uint32_t LastInput;
+};
+
+static std::array<Client*, Config::MaxClients> s_Clients;
 static int s_ClientCount = 0;
 
 uint64_t GetMilliseconds()
@@ -47,7 +54,7 @@ static uint32_t AssignClient()
 	{
 		if (s_Clients[i] == nullptr)
 		{
-			s_Clients[i] = new Entity;
+			s_Clients[i] = new Client;
 			return i;
 		}
 	}
@@ -96,9 +103,9 @@ static void BroadcastPacket(const std::shared_ptr<Packet>& packet)
 // Use this to check for cheating.
 // TODO: Implement a better check. Should probably check how far this movement will move the player and discard
 //       based on that.
-static bool ValidateInput(const InputSnapshot& input, float dt)
+static bool ValidateInput(const InputSnapshot& input)
 {
-	if (input.DeltaX > 1.0f || input.DeltaY > 1.0f || dt > 1.0f)
+	if (input.DeltaX > 1.0f || input.DeltaY > 1.0f || input.DeltaTime > 1.0f)
 	{
 		return false;
 	}
@@ -117,9 +124,10 @@ static void HandlePacket(const std::shared_ptr<Packet>& p, uint32_t clientID)
 	{
 	case PacketType::Input: {
 		auto packet = std::dynamic_pointer_cast<InputPacket>(p);
-		if (ValidateInput(packet->Input, packet->DeltaTime))
+		if (ValidateInput(packet->Input))
 		{
-			client->Update(packet->Input, packet->DeltaTime);
+			client->Entity.Update(packet->Input);
+			client->LastInput = packet->Input.SequenceNumber;
 		}
 	} break;
 	}
@@ -203,8 +211,9 @@ static void RunServer()
 			if (client == nullptr) { continue; }
 			WorldStatePacket::Entry entry;
 			entry.EntityID = i;
-			entry.X = client->X;
-			entry.Y = client->Y;
+			entry.PreviousInput = client->LastInput;
+			entry.X = client->Entity.X;
+			entry.Y = client->Entity.Y;
 			packet->Entries.push_back(entry);
 		}
 		BroadcastPacket(packet);

@@ -1,16 +1,20 @@
 #pragma once
 
+#include <cstdint>
+
 // Represents a snapshot of an entities input at some particular point in time.
 struct InputSnapshot
 {
+	uint32_t SequenceNumber = 0;
+	float DeltaTime = 0;
 	float DeltaX = 0;
 	float DeltaY = 0;
 
 	InputSnapshot() = default;
 	InputSnapshot(const InputSnapshot&) = default;
 
-	InputSnapshot(float dx, float dy)
-		: DeltaX(dx), DeltaY(dy)
+	InputSnapshot(uint32_t seq, float dt, float dx, float dy)
+		: SequenceNumber(seq), DeltaTime(dt), DeltaX(dx), DeltaY(dy)
 	{
 	}
 
@@ -31,5 +35,5 @@ public:
 	float Y = 0;
 public:
 	// Updates this entities position based on the supplied input and delta time.
-	void Update(const InputSnapshot& input, float dt);
+	void Update(const InputSnapshot& input);
 };

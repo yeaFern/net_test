@@ -1,7 +1,7 @@
 #include "Entity.h"
 
-void Entity::Update(const InputSnapshot& input, float dt)
+void Entity::Update(const InputSnapshot& input)
 {
-	this->X += input.DeltaX * Speed * dt;
-	this->Y += input.DeltaY * Speed * dt;
+	this->X += input.DeltaX * Speed * input.DeltaTime;
+	this->Y += input.DeltaY * Speed * input.DeltaTime;
 }

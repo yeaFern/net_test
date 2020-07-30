@@ -29,6 +29,9 @@ private:
 
 	uint32_t m_PlayerID = -1;
 	std::array<Entity*, Config::MaxClients> m_Entities{ nullptr };
+
+	std::vector<InputSnapshot> m_PendingInputs;
+	uint32_t m_InputSequenceNumber = 0;
 public:
 	bool OnUserCreate() override
 	{
@@ -111,7 +114,7 @@ public:
 		m_Connected = false;
 	}
 
-	InputSnapshot GetPlayerInput()
+	InputSnapshot GetPlayerInput(float dt)
 	{
 		float dx = 0.0f;
 		float dy = 0.0f;
@@ -127,11 +130,11 @@ public:
 			dx /= l;
 			dy /= l;
 
-			return InputSnapshot(dx, dy);
+			return InputSnapshot(m_InputSequenceNumber++, dt, dx, dy);
 		}
 
 		// If the player didn't move, return an empty snapshot.
-		return InputSnapshot(0.0f, 0.0f);
+		return InputSnapshot();
 	}
 
 	void NetworkPoll()
@@ -213,7 +216,23 @@ public:
 					m_Entities[entry.EntityID]->X = entry.X;
 					m_Entities[entry.EntityID]->Y = entry.Y;
 
-					// Here we will do reconciliation.
+					// Perform reconciliation.
+					uint32_t j = 0;
+					while (j < m_PendingInputs.size())
+					{
+						auto& input = m_PendingInputs[j];
+						if (input.SequenceNumber <= entry.PreviousInput)
+						{
+							// This input has been processed by the server, so drop it.
+							m_PendingInputs.erase(m_PendingInputs.begin() + j);
+						}
+						else
+						{
+							// This input has not been processed by the server yet, so reapply it.
+							m_Entities[entry.EntityID]->Update(input);
+							j++;
+						}
+					}
 				}
 				else
 				{
@@ -245,16 +264,18 @@ public:
 		if (m_State == GameState::Playing)
 		{
 			// Only allow player input in the playing state.
-			if (auto input = GetPlayerInput(); input.HasInput())
+			if (auto input = GetPlayerInput(dt); input.HasInput())
 			{
 				// Send the input to the server.
 				auto packet = Packet::Create<InputPacket>();
 				packet->Input = input;
-				packet->DeltaTime = dt;
 				SendPacket(packet);
 
 				// Apply the input locally right away (prediction).
-				m_Entities[m_PlayerID]->Update(input, dt);
+				m_Entities[m_PlayerID]->Update(input);
+
+				// Save the input for reconciliation.
+				m_PendingInputs.push_back(input);
 			}
 		}
 
