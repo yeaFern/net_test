@@ -2,11 +2,21 @@
 #include <enet.h>
 
 #include "SharedConfig.h"
+#include "Packet.h"
 #include "Entity.h"
 
 static constexpr auto ConnectionTimeout = 800;
 static constexpr auto DisconnectTimeout = 800;
 static constexpr auto ServerAddress = "127.0.0.1";
+
+// Represents the state of the game.
+// The game is initially in the handshaking state, it switches to the playing state
+// once the client has received it's ID from the server.
+enum class GameState
+{
+	Handshaking,
+	Playing
+};
 
 class NetworkedGame : public olc::PixelGameEngine
 {
@@ -14,6 +24,9 @@ private:
 	ENetHost* m_Client;
 	ENetPeer* m_Peer;
 	bool m_Connected = false;
+	GameState m_State = GameState::Handshaking;
+
+	uint32_t m_PlayerID = -1;
 
 	Entity m_Player;
 public:
@@ -140,28 +153,57 @@ public:
 				std::cout << "ENET_EVENT_TYPE_DISCONNECT_TIMEOUT" << std::endl;
 			} break;
 			case ENET_EVENT_TYPE_RECEIVE: {
-				std::cout << "ENET_EVENT_TYPE_RECEIVE" << std::endl;
+				DataReader reader(event.packet->data, event.packet->dataLength);
+
+				// Read the packet ID from the buffer.
+				uint8_t packetID = reader.Read<uint8_t>();
+
+				// Create the packet based on its ID.
+				auto packet = Packet::CreateFromID(packetID);
+
+				// Read the rest of the packet from the buffer.
+				packet->Read(reader);
+
+				// Handle the packet.
+				HandlePacket(packet);
+
 				enet_packet_destroy(event.packet);
 			} break;
 			}
 		}
 	}
 
+	void HandlePacket(const std::shared_ptr<Packet>& p)
+	{
+		switch (p->Type)
+		{
+		case PacketType::Welcome: {
+			auto packet = std::dynamic_pointer_cast<WelcomePacket>(p);
+			m_PlayerID = packet->ClientID;
+			m_State = GameState::Playing;
+		} break;
+		}
+	}
+
 	bool OnUserUpdate(float dt) override
 	{
+		// Poll for incoming packets.
+		NetworkPoll();
+
 		// Utility input.
 		if (GetKey(olc::Key::C).bPressed) { Connect(); }
 		if (GetKey(olc::Key::ESCAPE).bPressed) { Disconnect(); }
 
 		// Player input.
-		if (auto input = GetPlayerInput(); input.HasInput())
+		if (m_State == GameState::Playing)
 		{
-			// Apply the input locally right away (prediction).
-			m_Player.Update(input, dt);
+			// Only allow player input in the playing state.
+			if (auto input = GetPlayerInput(); input.HasInput())
+			{
+				// Apply the input locally right away (prediction).
+				m_Player.Update(input, dt);
+			}
 		}
-
-		// Poll for incoming packets.
-		NetworkPoll();
 
 		// Render.
 		Clear(olc::BLACK);
