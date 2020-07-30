@@ -19,6 +19,27 @@ enum class GameState
 	Playing
 };
 
+struct EntityPosition
+{
+	float Timestamp = 0;
+	float X = 0;
+	float Y = 0;
+
+	EntityPosition() = default;
+	EntityPosition(const EntityPosition&) = default;
+
+	EntityPosition(float ts, float x, float y)
+		: Timestamp(ts), X(x), Y(y)
+	{
+	}
+};
+
+struct Player
+{
+	Entity WorldEntity;
+	std::vector<EntityPosition> PositionBuffer;
+};
+
 class NetworkedGame : public olc::PixelGameEngine
 {
 private:
@@ -28,7 +49,9 @@ private:
 	GameState m_State = GameState::Handshaking;
 
 	uint32_t m_PlayerID = -1;
-	std::array<Entity*, Config::MaxClients> m_Entities{ nullptr };
+	std::array<Player*, Config::MaxClients> m_Entities{ nullptr };
+
+	float m_GameTime = 0.0f;
 
 	std::vector<InputSnapshot> m_PendingInputs;
 	uint32_t m_InputSequenceNumber = 0;
@@ -201,7 +224,7 @@ public:
 			m_PlayerID = packet->ClientID;
 
 			// Create the players entity.
-			m_Entities[m_PlayerID] = new Entity;
+			m_Entities[m_PlayerID] = new Player;
 
 			// Move to the playing state.
 			m_State = GameState::Playing;
@@ -213,8 +236,8 @@ public:
 			{
 				if (entry.EntityID == m_PlayerID)
 				{
-					m_Entities[entry.EntityID]->X = entry.X;
-					m_Entities[entry.EntityID]->Y = entry.Y;
+					m_Entities[entry.EntityID]->WorldEntity.X = entry.X;
+					m_Entities[entry.EntityID]->WorldEntity.Y = entry.Y;
 
 					// Perform reconciliation.
 					uint32_t j = 0;
@@ -229,7 +252,7 @@ public:
 						else
 						{
 							// This input has not been processed by the server yet, so reapply it.
-							m_Entities[entry.EntityID]->Update(input);
+							m_Entities[entry.EntityID]->WorldEntity.Update(input);
 							j++;
 						}
 					}
@@ -239,20 +262,59 @@ public:
 					if (m_Entities[entry.EntityID] == nullptr)
 					{
 						// If we encounter a new entity, create it.
-						m_Entities[entry.EntityID] = new Entity;
+						m_Entities[entry.EntityID] = new Player;
 					}
 
 					// Here we will do interpolation, but for now just set the entities position.
-					m_Entities[entry.EntityID]->X = entry.X;
-					m_Entities[entry.EntityID]->Y = entry.Y;
+					// m_Entities[entry.EntityID]->WorldEntity.X = entry.X;
+					// m_Entities[entry.EntityID]->WorldEntity.Y = entry.Y;
+
+					m_Entities[entry.EntityID]->PositionBuffer.push_back(EntityPosition(m_GameTime, entry.X, entry.Y));
 				}
 			}
 		} break;
 		}
 	}
 
+	void InterpolateEntities()
+	{
+		// Some time in the past.
+		float renderTimestamp = m_GameTime - (1.0f / Config::ServerTimestep);
+
+		for (auto entity : m_Entities)
+		{
+			if (entity == nullptr) { continue; }
+			if (entity == m_Entities[m_PlayerID]) { continue; }
+
+			auto& buffer = entity->PositionBuffer;
+
+			// Drop all older positions.
+			while (buffer.size() >= 2 && buffer[1].Timestamp <= renderTimestamp)
+			{
+				buffer.erase(buffer.begin());
+			}
+
+			// Interpolate between the two newest positions.
+			if (buffer.size() >= 2 && buffer[0].Timestamp <= renderTimestamp && renderTimestamp <= buffer[1].Timestamp)
+			{
+				auto x0 = buffer[0].X;
+				auto x1 = buffer[1].X;
+				auto y0 = buffer[0].Y;
+				auto y1 = buffer[1].Y;
+
+				auto t0 = buffer[0].Timestamp;
+				auto t1 = buffer[1].Timestamp;
+
+				entity->WorldEntity.X = x0 + (x1 - x0) * (renderTimestamp - t0) / (t1 - t0);
+				entity->WorldEntity.Y = y0 + (y1 - y0) * (renderTimestamp - t0) / (t1 - t0);
+			}
+		}
+	}
+
 	bool OnUserUpdate(float dt) override
 	{
+		m_GameTime += dt;
+
 		// Poll for incoming packets.
 		NetworkPoll();
 
@@ -272,19 +334,21 @@ public:
 				SendPacket(packet);
 
 				// Apply the input locally right away (prediction).
-				m_Entities[m_PlayerID]->Update(input);
+				m_Entities[m_PlayerID]->WorldEntity.Update(input);
 
 				// Save the input for reconciliation.
 				m_PendingInputs.push_back(input);
 			}
 		}
 
+		InterpolateEntities();
+
 		// Render.
 		Clear(olc::BLACK);
 		for (auto entity : m_Entities)
 		{
 			if (entity == nullptr) { continue; }
-			FillRect(entity->X, entity->Y, 16, 16);
+			FillRect(entity->WorldEntity.X, entity->WorldEntity.Y, 16, 16);
 		}
 
 		if (m_Connected)
